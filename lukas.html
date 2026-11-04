@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="id"><head><meta charset="utf-8"><title>LUKAS – Laporan Uang Kas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+:root{--navy:#1b2f5e;--bg:#fff;--card:#f4f6fb;--tx:#16203a;--mut:#69728a;--bd:#dde2ee;--g:#16a34a;--r:#dc2626;--y:#d99a00;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--navy:#7da2ff;--bg:#0f1524;--card:#18203a;--tx:#e8ecf8;--mut:#9aa4c0;--bd:#2a3556;--g:#4ade80;--r:#f87171;--y:#fbbf24}}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+header{background:var(--navy);color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) header{color:#0f1524}}
+header b{font-size:18px;letter-spacing:1px}header small{opacity:.85}
+nav{display:flex;gap:6px;overflow-x:auto;padding:10px 12px;border-bottom:1px solid var(--bd);position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);z-index:5}
+nav button{white-space:nowrap;border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:7px 12px;border-radius:99px;font:inherit}
+nav button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) nav button.on{color:#0f1524}}
+main{max-width:900px;margin:0 auto;padding:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:14px}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px}
+.c small{color:var(--mut);display:block}.c b{font-size:19px}
+.in{color:var(--g)}.out{color:var(--r)}.warn{color:var(--y)}
+h3{margin:16px 0 8px;color:var(--navy)}
+.row{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd)}
+.row small{color:var(--mut)}.tag{font-size:12px;border:1px solid var(--bd);border-radius:6px;padding:1px 6px;color:var(--mut)}
+button.p,button.s{border:0;border-radius:8px;padding:8px 14px;font:inherit;cursor:pointer;margin:2px 4px 2px 0}
+button.p{background:var(--navy);color:#fff}button.s{background:var(--card);color:var(--tx);border:1px solid var(--bd)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) button.p{color:#0f1524}}
+button.d{color:var(--r)}
+.modal{position:fixed;inset:0;background:#0008;display:flex;align-items:flex-end;justify-content:center;z-index:20}
+.modal form{background:var(--bg);width:100%;max-width:480px;padding:16px;border-radius:16px 16px 0 0;max-height:90%;overflow:auto}
+label{display:block;font-size:13px;color:var(--mut);margin-top:8px}
+input,select,textarea{width:100%;padding:9px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);font:inherit}
+.note{background:var(--card);border-left:4px solid var(--y);padding:8px 12px;border-radius:6px;font-size:13px;margin:10px 0}
+.empty{color:var(--mut);padding:14px 0}svg{width:100%;height:auto}
+</style></head><body>
+<header><div><b>LUKAS</b><br><small id="kls">Laporan Uang Kas</small></div><small id="who"></small></header>
+<nav id="nav"></nav><main id="m"><p class="empty">Memuat data…</p></main><div id="modal"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script>
+const $=s=>document.querySelector(s);
+const rp=n=>"Rp "+Math.round(n||0).toLocaleString("id-ID");
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const today=()=>new Date().toISOString().slice(0,10);
+const ST={men:"Menunggu persetujuan",dis:"Disetujui, menunggu bukti pembelian",tol:"Ditolak",rev:"Perlu revisi",sel:"Selesai"};
+const CATS=["Alat tulis","Kebersihan kelas","Dekorasi kelas","Perlengkapan belajar","Kegiatan kelas","Konsumsi","Perbaikan fasilitas","Lainnya"];
+const ANN=["Informasi pembayaran","Jadwal kas","Kebutuhan kelas","Kegiatan kelas","Informasi penting"];
+let sb,role="siswa",S={prof:[],stu:[],tx:[],req:[],ann:[],set:{awal:0,kelas:"",bend:[],freq:"mingguan",nominal:5000,next:""}},db,user,me="",admin=false,tab="Dashboard",ready=false;
+const isBend=()=>role==="bendahara";
+const canIn=()=>admin||isBend();
+const TABS=()=>["Dashboard","Uang masuk","Uang keluar","Pengajuan","Siswa","Pengumuman","Laporan","Pengaturan"];
+
+function saldo(){let i=0,o=0;S.tx.forEach(t=>t.type==="in"?i+=+t.amount:o+=+t.amount);return{i,o,s:(+S.set.awal||0)+i-o}}
+function due(){const m=S.set.mulai;if(!m)return 0;const a=new Date(m),b=new Date(today());if(b<a)return 0;const d=Math.floor((b-a)/864e5),f=S.set.freq;return(f==="harian"?d:f==="mingguan"?Math.floor(d/7):(b.getFullYear()-a.getFullYear())*12+b.getMonth()-a.getMonth())+1}
+const paid=id=>S.tx.filter(t=>t.type==="in"&&t.sid===id).reduce((s,t)=>s+ +t.amount,0);
+const bal=id=>paid(id)-due()*(+S.set.nominal||0);
+const paidNow=id=>bal(id)>=0;
+const balTxt=id=>{const b=bal(id),n=+S.set.nominal||1;return`Dibayar ${rp(paid(id))} dari kewajiban ${rp(due()*n)} · `+(b<0?`<b class="out">−${rp(-b)} (tunggakan)</b>`:b>0?`<b class="in">+${rp(b)} (lebih, lunas ${Math.floor(b/n)} periode ke depan)</b>`:'<b class="in">Lunas</b>')};
+
+async function init(){
+  if(!window.SUPABASE_URL||SUPABASE_URL.includes("ISI")){$("#m").innerHTML='<p class="empty">Isi config.js dengan URL dan anon key Supabase (lihat README).</p>';return}
+  sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+  const{data:{session}}=await sb.auth.getSession();
+  if(!session)return loginUI();
+  me=session.user.id;
+  const{data:p}=await sb.from("profiles").select("role").eq("id",me).single();
+  role=p?.role||"siswa";admin=role==="admin";db=mkDb();
+  let tm;const idle=()=>{clearTimeout(tm);tm=setTimeout(async()=>{await sb.auth.signOut();location.reload()},15*60*1000)};["click","keydown","touchstart"].forEach(e=>addEventListener(e,idle));idle();
+  const sub=(n,k)=>db.collection(n).onSnapshot(q=>{S[k]=q.docs.map(d=>({id:d.id,...d.data()}));render()},()=>{});
+  sub("students","stu");sub("tx","tx");sub("requests","req");sub("announcements","ann");
+  if(admin){const lp=async()=>{const{data}=await sb.from("profiles").select("*");S.prof=data||[];render()};lp();window.reloadProf=lp}
+  db.doc("config/main").onSnapshot(d=>{if(d.exists)S.set={...S.set,...d.data()};ready=true;render()},()=>{});
+  setTimeout(()=>{ready=true;render()},3000);
+}
+function render(){
+  if(!db)return;
+  $("#kls").textContent=S.set.kelas||"Laporan Uang Kas";
+  $("#who").innerHTML=(admin?"Admin":isBend()?"Bendahara":"Siswa")+' · <a href="#" data-act="out" style="color:inherit">Keluar</a>';
+  $("#nav").innerHTML=TABS().filter(t=>t!=="Pengaturan"||admin).map(t=>`<button class="${t===tab?"on":""}" data-tab="${t}">${t}</button>`).join("");
+  const v={Dashboard,"Uang masuk":uangMasuk,"Uang keluar":uangKeluar,Pengajuan:pengajuan,Siswa:siswa,Pengumuman:pengumuman,Laporan:laporan,Pengaturan:pengaturan}[tab];
+  $("#m").innerHTML=v();
+}
+function chart(){
+  let pts=[],s=+S.set.awal||0;[...S.tx].sort((a,b)=>(a.date||"").localeCompare(b.date||"")).forEach(t=>{s+=t.type==="in"?+t.amount:-t.amount;pts.push(s)});
+  if(pts.length<2)return'<p class="empty">Grafik saldo muncul setelah ada minimal 2 transaksi.</p>';
+  const mx=Math.max(...pts,1),mn=Math.min(...pts,0),W=320,H=110,x=i=>10+i*(W-20)/(pts.length-1),y=v=>H-8-(v-mn)/(mx-mn||1)*(H-16);
+  return`<svg viewBox="0 0 ${W} ${H}"><polyline fill="none" stroke="var(--navy)" stroke-width="2.5" points="${pts.map((v,i)=>x(i)+","+y(v)).join(" ")}"/></svg>`;
+}
+function txRows(list){return list.length?list.map(t=>`<div class="row"><div><b>${esc(t.desc||t.cat)}</b><br><small>${esc(t.date)} · ${esc(t.who||t.cat||"")} · oleh ${esc(t.by||"-")}${t.demo?' · <span class="tag">demo</span>':""}</small></div><b class="${t.type}">${t.type==="in"?"+":"−"}${rp(t.amount)}</b></div>`).join(""):'<p class="empty">Belum ada transaksi.</p>'}
+const sorted=()=>[...S.tx].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+function Dashboard(){
+  const a=saldo(),ak=S.stu.filter(s=>s.active!==false),p=ak.filter(s=>paidNow(s.id)).length;
+  let h=!ready?"":(admin&&!S.set.kelas?'<div class="note">Selamat datang! Buka tab <b>Pengaturan</b> untuk mengisi nama kelas dan saldo awal.</div>':"");
+  h+=`<div class="grid"><div class="c"><small>Total saldo kas</small><b>${rp(a.s)}</b></div><div class="c"><small>Uang masuk</small><b class="in">${rp(a.i)}</b></div><div class="c"><small>Uang keluar</small><b class="out">${rp(a.o)}</b></div><div class="c"><small>Jumlah siswa</small><b>${ak.length}</b></div><div class="c"><small>Lunas (tidak menunggak)</small><b class="in">${p}</b></div><div class="c"><small>Menunggak</small><b class="warn">${ak.length-p}</b></div><div class="c"><small>Total tunggakan</small><b class="out">${rp(ak.reduce((s,x)=>s+Math.max(0,-bal(x.id)),0))}</b></div></div>`;
+  h+=`<div class="c"><small>Jadwal pembayaran berikutnya</small><b>${S.set.next?esc(S.set.next):"Belum diatur"}</b> <small>${esc(S.set.freq)} · ${rp(S.set.nominal)}</small></div>`;
+  const an=[...S.ann].sort((a,b)=>(b.date||"").localeCompare(a.date||""))[0];
+  h+=`<h3>Pengumuman terbaru</h3>${an?`<div class="c"><b>${esc(an.title)}</b> <span class="tag">${esc(an.cat)}</span><br>${esc(an.body)}</div>`:'<p class="empty">Belum ada pengumuman.</p>'}`;
+  h+=`<h3>Perkembangan saldo</h3><div class="c">${chart()}</div><h3>Riwayat transaksi</h3>${txRows(sorted().slice(0,8))}`;
+  const pend=S.req.filter(r=>r.status==="men").length;
+  if(admin&&pend)h+=`<div class="note">${pend} pengajuan menunggu persetujuan Anda (tab Pengajuan).</div>`;
+  return h;
+}
+function uangMasuk(){return(canIn()?'<button class="p" data-act="addIn">+ Catat uang masuk</button>':"")+"<h3>Uang masuk</h3>"+txRows(sorted().filter(t=>t.type==="in"))}
+function uangKeluar(){return"<h3>Uang keluar</h3>"+txRows(sorted().filter(t=>t.type==="out"))+'<p class="note">Setiap pengeluaran tercatat hanya setelah pengajuan disetujui admin dan bukti pembelian dimasukkan.</p>'}
+function pengajuan(){
+  let h=(isBend()||admin)?'<button class="p" data-act="addReq">+ Ajukan pengeluaran</button>':"";
+  h+="<h3>Status pengajuan</h3>";
+  const L=[...S.req].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  h+=L.length?L.map(r=>`<div class="row"><div><b>${esc(r.name)}</b> <span class="tag">${esc(r.cat)}</span><br><small>${esc(r.date)} · ${esc(r.reason)} · pembeli ${esc(r.buyer||"-")}, ${esc(r.place||"-")}</small><br><span class="${r.status==="sel"?"in":r.status==="tol"?"out":"warn"}">${ST[r.status]}</span>${r.note?` <small>(${esc(r.note)})</small>`:""}<br>`+
+   (admin&&r.status==="men"?`<button class="p" data-act="ok" data-id="${r.id}">Setujui</button><button class="s" data-act="rev" data-id="${r.id}">Minta revisi</button><button class="s d" data-act="no" data-id="${r.id}">Tolak</button>`:"")+
+   ((isBend()||admin)&&r.status==="dis"?`<button class="p" data-act="done" data-id="${r.id}">Unggah nota / nominal aktual</button>`:"")+
+   ((isBend()||admin)&&r.status==="rev"?`<button class="p" data-act="resub" data-id="${r.id}">Kirim ulang</button>`:"")+
+   `</div><b>${rp(r.est)}</b></div>`).join(""):'<p class="empty">Belum ada pengajuan.</p>';
+  return h;
+}
+function siswa(){
+  let h=admin?'<button class="p" data-act="addStu">+ Tambah siswa</button>':"";
+  const L=[...S.stu].sort((a,b)=>(+a.no||0)-(+b.no||0));
+  h+=S.set.mulai?"":'<div class="note">Admin: isi tanggal “Mulai kas” di Pengaturan agar tunggakan dihitung.</div>';h+="<h3>Daftar siswa & saldo kas masing-masing</h3>";
+  return h+(L.length?L.map(s=>`<div class="row"><div><b>${s.no}. ${esc(s.name)}</b>${s.demo?' <span class="tag">demo</span>':""}<br><small>${s.active===false?"Nonaktif":balTxt(s.id)}</small></div>${admin?`<div><button class="s" data-act="togStu" data-id="${s.id}">${s.active===false?"Aktifkan":"Nonaktifkan"}</button></div>`:""}</div>`).join(""):'<p class="empty">Belum ada data siswa.</p>');
+}
+function pengumuman(){
+  let h=canIn()?'<button class="p" data-act="addAnn">+ Buat pengumuman</button>':"";
+  const L=[...S.ann].sort((a,b)=>(b.date||"").localeCompare(a.date||""));
+  return h+"<h3>Pengumuman</h3>"+(L.length?L.map(a=>`<div class="c" style="margin-bottom:8px"><b>${esc(a.title)}</b> <span class="tag">${esc(a.cat)}</span><br><small>${esc(a.date)}</small><br>${esc(a.body)}${admin?`<br><button class="s d" data-act="delAnn" data-id="${a.id}">Hapus</button>`:""}</div>`).join(""):'<p class="empty">Belum ada pengumuman.</p>');
+}
+function laporan(){
+  const a=saldo(),mo={};S.tx.forEach(t=>{const k=(t.date||"").slice(0,7);mo[k]=mo[k]||{i:0,o:0};mo[k][t.type==="in"?"i":"o"]+=+t.amount});
+  return`<div class="grid"><div class="c"><small>Saldo awal</small><b>${rp(S.set.awal)}</b></div><div class="c"><small>Pemasukan</small><b class="in">${rp(a.i)}</b></div><div class="c"><small>Pengeluaran</small><b class="out">${rp(a.o)}</b></div><div class="c"><small>Saldo akhir</small><b>${rp(a.s)}</b></div></div><button class="p" data-act="csv">Unduh Excel (CSV)</button><button class="s" data-act="print">Cetak / simpan PDF</button><h3>Rekap bulanan</h3>`+
+   (Object.keys(mo).sort().reverse().map(k=>`<div class="row"><b>${k}</b><span><span class="in">+${rp(mo[k].i)}</span> · <span class="out">−${rp(mo[k].o)}</span></span></div>`).join("")||'<p class="empty">Belum ada data.</p>');
+}
+function pengaturan(){
+  return`<h3>Pengaturan kelas</h3><div class="c"><b>${esc(S.set.kelas||"Belum diberi nama")}</b><br><small>Saldo awal ${rp(S.set.awal)} · kas ${esc(S.set.freq)} ${rp(S.set.nominal)} · jadwal berikutnya ${esc(S.set.next||"-")}</small><br><button class="p" data-act="setCfg">Ubah pengaturan</button></div>
+  <h3>Akun & peran</h3><div class="c">${S.prof.map(p=>`<div class="row"><small>${esc(p.email)}</small><span>${p.role} <button class="s" data-act="role" data-id="${p.id}">Ubah</button></span></div>`).join("")}<p class="note">Siswa mendaftar sendiri lewat halaman login. Di sini admin menaikkan akun menjadi bendahara atau admin.</p></div><h3>ID akun saya</h3><div class="c"><small>${esc(me)}</small></div>
+  <h3>Data demo</h3><button class="s" data-act="demo">Isi data demo</button><button class="s d" data-act="clearDemo">Hapus data demo</button>`;
+}
+
+function form(title,fields,go){
+  $("#modal").innerHTML=`<div class="modal"><form><h3 style="margin-top:0">${title}</h3>${fields.map(f=>`<label>${f.l}${f.t==="select"?`<select name="${f.n}">${f.o.map(o=>`<option>${esc(o)}</option>`).join("")}</select>`:f.t==="area"?`<textarea name="${f.n}" rows="3" ${f.r?"required":""}>${esc(f.v||"")}</textarea>`:`<input name="${f.n}" type="${f.t||"text"}" value="${esc(f.v??"")}" ${f.r?"required":""} ${f.t==="number"?'min="0"':""}>`}</label>`).join("")}<p><button class="p">Simpan</button><button type="button" class="s" onclick="$('#modal').innerHTML=''">Batal</button></p></form></div>`;
+  $("#modal form").onsubmit=async e=>{e.preventDefault();const o=Object.fromEntries(new FormData(e.target));try{await go(o);$("#modal").innerHTML=""}catch(x){alert("Gagal menyimpan: "+(x.message||"tidak diizinkan"))}};
+}
+const num=v=>Math.max(0,+v||0);
+const act={
+  addIn(){form("Catat uang masuk",[{l:"Nama siswa",n:"sid",t:"select",o:S.stu.filter(s=>s.active!==false).map(s=>s.no+". "+s.name)},{l:"Tanggal",n:"date",t:"date",v:today(),r:1},{l:"Nominal (Rp)",n:"amount",t:"number",v:S.set.nominal,r:1},{l:"Metode",n:"method",t:"select",o:["Tunai","Transfer","E-wallet"]},{l:"Keterangan",n:"desc"}],async o=>{const s=S.stu.find(x=>x.no+". "+x.name===o.sid);if(!s)throw Error("Pilih siswa");if(!num(o.amount))throw Error("Nominal tidak valid");await db.collection("tx").add({type:"in",sid:s.id,who:s.name,date:o.date,amount:num(o.amount),method:o.method,desc:o.desc||"Kas "+s.name,by:admin?"Admin":"Bendahara",uid:me})})},
+  addReq(){form("Ajukan pengeluaran",[{l:"Nama barang/kebutuhan",n:"name",r:1},{l:"Perkiraan nominal (Rp)",n:"est",t:"number",r:1},{l:"Kategori",n:"cat",t:"select",o:CATS},{l:"Alasan penggunaan",n:"reason",t:"area",r:1},{l:"Nama pembeli",n:"buyer"},{l:"Tempat pembelian",n:"place"}],async o=>{if(!num(o.est))throw Error("Nominal tidak valid");await db.collection("requests").add({...o,est:num(o.est),status:"men",date:today(),by:me})})},
+  ok:id=>db.doc("requests/"+id).update({status:"dis",approved:S.req.find(r=>r.id===id).est,note:""}),
+  no:id=>form("Alasan penolakan",[{l:"Catatan",n:"note",r:1}],o=>db.doc("requests/"+id).update({status:"tol",note:o.note})),
+  rev:id=>form("Catatan revisi",[{l:"Yang perlu direvisi",n:"note",r:1}],o=>db.doc("requests/"+id).update({status:"rev",note:o.note})),
+  resub:id=>{const r=S.req.find(x=>x.id===id);form("Kirim ulang pengajuan",[{l:"Nominal (Rp)",n:"est",t:"number",v:r.est,r:1}],o=>db.doc("requests/"+id).update({est:num(o.est),status:"men",note:""}))},
+  done:id=>{const r=S.req.find(x=>x.id===id);form("Bukti pembelian",[{l:"Nominal aktual (Rp)",n:"act",t:"number",v:r.approved,r:1},{l:"Tanggal pembelian",n:"date",t:"date",v:today(),r:1},{l:"Nomor/keterangan nota",n:"nota"}],async o=>{const a=num(o.act);if(!a)throw Error("Nominal tidak valid");
+    if(a>r.approved){await db.doc("requests/"+id).update({est:a,status:"men",note:"Nominal aktual melebihi yang disetujui, perlu persetujuan ulang"});return}
+    await db.collection("tx").add({type:"out",date:o.date,amount:a,cat:r.cat,desc:r.name+" – "+r.reason,who:r.place,nota:o.nota||"",by:"Bendahara",rid:id,uid:me});await db.doc("requests/"+id).update({status:"sel"})})},
+  addStu(){form("Tambah siswa",[{l:"Nama lengkap",n:"name",r:1},{l:"Nomor absen",n:"no",t:"number",r:1}],o=>db.collection("students").add({name:o.name,no:+o.no,active:true}))},
+  togStu(id){const s=S.stu.find(x=>x.id===id);return db.doc("students/"+id).update({active:s.active===false})},
+  addAnn(){form("Buat pengumuman",[{l:"Judul",n:"title",r:1},{l:"Isi pesan",n:"body",t:"area",r:1},{l:"Kategori",n:"cat",t:"select",o:ANN}],o=>db.collection("announcements").add({...o,date:today(),by:me}))},
+  delAnn:id=>db.doc("announcements/"+id).delete(),
+  setCfg(){form("Pengaturan",[{l:"Nama kelas",n:"kelas",v:S.set.kelas,r:1},{l:"Saldo awal (Rp)",n:"awal",t:"number",v:S.set.awal},{l:"Periode kas",n:"freq",t:"select",o:["harian","mingguan","bulanan"]},{l:"Nominal kas (Rp)",n:"nominal",t:"number",v:S.set.nominal},{l:"Mulai kas (tanggal)",n:"mulai",t:"date",v:S.set.mulai,r:1},{l:"Jadwal berikutnya",n:"next",t:"date",v:S.set.next}],o=>db.doc("config/main").set({...S.set,...o,awal:num(o.awal),nominal:num(o.nominal)}))},
+  role(id){form("Ubah peran",[{l:"Peran",n:"r",t:"select",o:["siswa","bendahara","admin"]}],async o=>{const{error}=await sb.rpc("set_role",{uid:id,new_role:o.r});if(error)throw error;window.reloadProf()})},
+  async out(){await sb.auth.signOut();location.reload()},
+  async demo(){const n=["Ayu","Budi","Citra","Dimas","Eka"];for(let i=0;i<5;i++){const r=await db.collection("students").add({name:n[i]+" (demo)",no:i+1,active:true,demo:true});if(i<3)await db.collection("tx").add({type:"in",sid:r.id,who:n[i]+" (demo)",date:today(),amount:5000,method:"Tunai",desc:"Kas demo",by:"Admin",demo:true})}await db.collection("tx").add({type:"out",date:today(),amount:8000,cat:"Alat tulis",desc:"Spidol papan tulis (demo)",by:"Bendahara",demo:true})},
+  async clearDemo(){if(!confirm("Hapus semua data demo?"))return;for(const k of[["students","stu"],["tx","tx"]])for(const d of S[k[1]].filter(x=>x.demo))await db.doc(k[0]+"/"+d.id).delete()},
+  csv(){const rows=[["Tanggal","Jenis","Nominal","Kategori/Siswa","Keterangan","Pencatat"],...sorted().map(t=>[t.date,t.type==="in"?"Masuk":"Keluar",t.amount,t.who||t.cat,t.desc,t.by])];const c="\ufeff"+rows.map(r=>r.map(v=>'"'+String(v??"").replace(/"/g,'""')+'"').join(",")).join("\n");const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([c],{type:"text/csv"}));a.download="laporan-kas.csv";a.click()},
+  print(){window.print()}
+};
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-tab]");if(t){tab=t.dataset.tab;render();return}
+  const b=e.target.closest("[data-act]");if(!b)return;
+  Promise.resolve(act[b.dataset.act](b.dataset.id)).catch(x=>alert("Gagal: "+(x.message||"tidak diizinkan")));
+});
+function loginUI(){
+ $("#m").innerHTML='<div class="c" style="max-width:360px;margin:20px auto"><h3 style="margin-top:0">Masuk ke LUKAS</h3><form id="lf"><label>Email<input name="e" type="email" required></label><label>Kata sandi (min. 8 karakter)<input name="p" type="password" minlength="8" required></label><p><button class="p">Masuk</button><button type="button" class="s" id="dft">Daftar sebagai siswa</button></p></form><small id="lm" class="out"></small></div>';
+ const go=async su=>{const f=new FormData($("#lf")),c={email:f.get("e"),password:f.get("p")};if(!c.email||c.password.length<8){$("#lm").textContent="Isi email dan kata sandi (min. 8 karakter)";return}
+  const r=su?await sb.auth.signUp(c):await sb.auth.signInWithPassword(c);
+  if(r.error){$("#lm").textContent=r.error.message;return}
+  if(su&&!r.data.session){$("#lm").textContent="Cek email untuk konfirmasi, lalu masuk.";return}
+  location.reload()};
+ $("#lf").onsubmit=e=>{e.preventDefault();go(false)};$("#dft").onclick=()=>go(true);
+}
+function mkDb(){
+ const T=()=>sb.from("docs"),mk=r=>({id:r.id,exists:true,data:()=>r.data});
+ const watch=load=>{load();const ch=sb.channel("r"+Math.random()).on("postgres_changes",{event:"*",schema:"public",table:"docs"},load).subscribe();return()=>sb.removeChannel(ch)};
+ const ref=(c,id)=>({
+  onSnapshot:(n,er)=>watch(async()=>{const{data,error}=await T().select("*").eq("coll",c).eq("id",id).maybeSingle();if(error)return er&&er(error);n(data?mk(data):{exists:false,id,data:()=>undefined})}),
+  async set(d){const{error}=await T().upsert({coll:c,id,data:d});if(error)throw error},
+  async update(d){const{data}=await T().select("data").eq("coll",c).eq("id",id).single();const{error}=await T().update({data:{...data.data,...d}}).eq("coll",c).eq("id",id);if(error)throw error},
+  async delete(){const{error}=await T().delete().eq("coll",c).eq("id",id);if(error)throw error}});
+ return{doc:p=>{const[c,id]=p.split("/");return ref(c,id)},
+  collection:c=>({onSnapshot:(n,er)=>watch(async()=>{const{data,error}=await T().select("*").eq("coll",c);if(error)return er&&er(error);n({docs:data.map(mk)})}),
+   async add(d){const{data,error}=await T().insert({coll:c,data:d}).select("id").single();if(error)throw error;return{id:data.id}}})}
+}
+init();
+</script></body></html>
